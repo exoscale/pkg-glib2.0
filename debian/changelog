@@ -1,3 +1,9 @@
+glib2.0 (2.32.4-0ubuntu1+exo1) precise; urgency=medium
+
+  * Fix reuse of source ID on overflow.
+
+ -- Vincent Bernat <bernat@debian.org>  Tue, 23 May 2017 08:15:14 +0200
+
 glib2.0 (2.32.4-0ubuntu1) precise; urgency=low
 
   * New upstream release (LP: #1154657)

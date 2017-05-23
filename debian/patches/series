@@ -7,3 +7,4 @@
 61_glib-compile-binaries-path.patch
 90-gio-modules-multiarch-compat.patch
 revert_schema_path_warning.patch
+0001-Fix-reuse-of-source-ids-on-overflow.patch

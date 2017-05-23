@@ -1,0 +1,96 @@
+From 684d9290f743cfbf0172ae16b0a69f543e0ff7a9 Mon Sep 17 00:00:00 2001
+From: Vincent Bernat <vincent@bernat.im>
+Date: Tue, 23 May 2017 08:09:14 +0200
+Subject: [PATCH] Fix reuse of source ids on overflow
+
+Bug originally fixed in https://bugzilla.gnome.org/687098
+The patches were rewritten in https://bugzilla.gnome.org/724839
+and this is the version that was backported. The backport is also
+present in RHEL 6 and no further patches have been added.
+---
+ glib/gmain.c | 30 +++++++++++++++++++-----------
+ 1 file changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/glib/gmain.c b/glib/gmain.c
+index 60c80c762fb2..90dad0f4a5c7 100644
+--- a/glib/gmain.c
++++ b/glib/gmain.c
+@@ -228,6 +228,8 @@ struct _GMainContext
+ 
+   gint ref_count;
+ 
++  GHashTable *sources;
++
+   GPtrArray *pending_dispatches;
+   gint timeout;			/* Timeout for current iteration */
+ 
+@@ -490,6 +492,7 @@ g_main_context_unref (GMainContext *context)
+       g_source_destroy_internal (source, context, FALSE);
+       source = next;
+     }
++  g_hash_table_destroy (context->sources);
+ 
+   g_mutex_clear (&context->mutex);
+ 
+@@ -532,6 +535,7 @@ g_main_context_new (void)
+   g_mutex_init (&context->mutex);
+   g_cond_init (&context->cond);
+ 
++  context->sources = g_hash_table_new (NULL, NULL);
+   context->owner = NULL;
+   context->waiters = NULL;
+ 
+@@ -866,9 +870,18 @@ g_source_attach_unlocked (GSource      *source,
+   GSList *tmp_list;
+ 
+   source->context = context;
+-  result = source->source_id = context->next_id++;
+ 
++  /* The counter may have wrapped, so we must ensure that we do not
++   * reuse the source id of an existing source.
++   */
++  do
++    result = context->next_id++;
++  while (result == 0 || g_hash_table_lookup (context->sources, GUINT_TO_POINTER (result)));
++
++  source->source_id = result;
+   source->ref_count++;
++
++  g_hash_table_insert (context->sources, GUINT_TO_POINTER (result), source);
+   g_source_list_add (source, context);
+ 
+   tmp_list = source->poll_fds;
+@@ -1640,6 +1653,7 @@ g_source_unref_internal (GSource      *source,
+ 	  if (!SOURCE_DESTROYED (source))
+ 	    g_warning (G_STRLOC ": ref_count == 0, but source was still attached to a context!");
+ 	  g_source_list_remove (source, context);
++	  g_hash_table_remove (context->sources, GUINT_TO_POINTER (source->source_id));
+ 	}
+ 
+       if (source->source_funcs->finalize)
+@@ -1718,18 +1732,12 @@ g_main_context_find_source_by_id (GMainContext *context,
+     context = g_main_context_default ();
+   
+   LOCK_CONTEXT (context);
+-  
+-  source = context->source_list;
+-  while (source)
+-    {
+-      if (!SOURCE_DESTROYED (source) &&
+-	  source->source_id == source_id)
+-	break;
+-      source = source->next;
+-    }
+-
++  source = g_hash_table_lookup (context->sources, GUINT_TO_POINTER (source_id));
+   UNLOCK_CONTEXT (context);
+ 
++  if (source && SOURCE_DESTROYED (source))
++    source = NULL;
++
+   return source;
+ }
+ 
+-- 
+2.11.0
+
